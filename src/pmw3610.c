@@ -687,30 +687,57 @@ static int pmw3610_report_data(const struct device *dev) {
     }
 #endif
 
-    if (x != 0 || y != 0) {
-        if (input_mode != SCROLL) {
-            input_report_rel(dev, INPUT_REL_X, x, false, K_FOREVER);
-            input_report_rel(dev, INPUT_REL_Y, y, true, K_FOREVER);
-        } else {
-            data->scroll_delta_x += x;
-            data->scroll_delta_y += y;
-            if (abs(data->scroll_delta_y) > CONFIG_PMW3610_SCROLL_TICK) {
-                input_report_rel(dev, INPUT_REL_WHEEL,
-                                 data->scroll_delta_y > 0 ? PMW3610_SCROLL_Y_NEGATIVE : PMW3610_SCROLL_Y_POSITIVE,
-                                 true, K_FOREVER);
-                data->scroll_delta_x = 0;
-                data->scroll_delta_y = 0;
-            } else if (abs(data->scroll_delta_x) > CONFIG_PMW3610_SCROLL_TICK) {
-                input_report_rel(dev, INPUT_REL_HWHEEL,
-                                 data->scroll_delta_x > 0 ? PMW3610_SCROLL_X_NEGATIVE : PMW3610_SCROLL_X_POSITIVE,
-                                 true, K_FOREVER);
-                data->scroll_delta_x = 0;
-                data->scroll_delta_y = 0;
+// スケーリング処理の設定（定義）
+#define CURVE_POINT 3  // 定義する区間数
+
+const int shift_points[CURVE_POINT] = {5, 15, 30};   // スケーリングのしきい値
+const int shift_rates[CURVE_POINT] = {50, 100, 150}; // 各区間でのスケーリング率
+
+// pmw3610_report_data関数内のスケーリング処理
+if (x != 0 || y != 0) {
+    // 移動量のノルムを計算
+    float norm = sqrtf(x * x + y * y);
+
+    if (shift_points[0] != 0 && norm != 0) {
+        float scaling_factor = 1.0f; // デフォルトのスケーリング係数
+
+        // shift_points と shift_rates に基づきスケーリング係数を決定
+        for (int i = 0; i < CURVE_POINT; i++) {
+            if (norm < shift_points[i] * 10 || i == CURVE_POINT - 1) {
+                scaling_factor = (float)shift_rates[i] / 100.0f;
+                break;
             }
         }
+
+        // スケーリング係数を x および y に適用
+        x *= scaling_factor;
+        y *= scaling_factor;
     }
 
-    return err;
+    // 入力モードに応じて報告処理
+    if (input_mode != SCROLL) {
+        input_report_rel(dev, INPUT_REL_X, x, false, K_FOREVER);
+        input_report_rel(dev, INPUT_REL_Y, y, true, K_FOREVER);
+    } else {
+        data->scroll_delta_x += x;
+        data->scroll_delta_y += y;
+        if (abs(data->scroll_delta_y) > CONFIG_PMW3610_SCROLL_TICK) {
+            input_report_rel(dev, INPUT_REL_WHEEL,
+                             data->scroll_delta_y > 0 ? PMW3610_SCROLL_Y_NEGATIVE : PMW3610_SCROLL_Y_POSITIVE,
+                             true, K_FOREVER);
+            data->scroll_delta_x = 0;
+            data->scroll_delta_y = 0;
+        } else if (abs(data->scroll_delta_x) > CONFIG_PMW3610_SCROLL_TICK) {
+            input_report_rel(dev, INPUT_REL_HWHEEL,
+                             data->scroll_delta_x > 0 ? PMW3610_SCROLL_X_NEGATIVE : PMW3610_SCROLL_X_POSITIVE,
+                             true, K_FOREVER);
+            data->scroll_delta_x = 0;
+            data->scroll_delta_y = 0;
+        }
+    }
+}
+
+return err;
 }
 
 static void pmw3610_gpio_callback(const struct device *gpiob, struct gpio_callback *cb,
